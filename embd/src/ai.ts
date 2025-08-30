@@ -43,7 +43,7 @@ type Message = {
   
   const BASE_URL = "https://openrouter.ai/api/v1/chat/completions";
   
-  export const infer = async (
+  export default async (
     system: string,
     body: string,
     responseType: "text/plain" | "application/json" = "text/plain",

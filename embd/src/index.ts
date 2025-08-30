@@ -1,6 +1,6 @@
 // server.ts
 import { Hono } from 'hono'
-import { infer } from './ai'
+import infer from '@/ai'
 import fs from 'fs'
 
 const app = new Hono()
