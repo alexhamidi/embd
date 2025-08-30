@@ -7,7 +7,7 @@ const app = new Hono()
 const cache = new Map<string, string>()
 
 // --- Runtime theme CSS (no Tailwind compile needed) ---
-const themeCss = `
+const themeCss =    `
 :root {
 /* Core surfaces */
 --background: #191919;

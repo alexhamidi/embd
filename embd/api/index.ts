@@ -114,7 +114,6 @@ async function ai(
       { role: "user", content: body },
     ];
 
-    
     const response = await fetch(BASE_URL, {
       method: "POST",
       headers: {
@@ -123,10 +122,6 @@ async function ai(
       },
       body: JSON.stringify({
         model,
-        provider: {
-          // only: ["Cerebras", "Groq"],
-          only: ["Groq"],
-        },
         messages,
       }),
     });
@@ -139,7 +134,7 @@ async function ai(
   
     const data = await response.json();
     const endTime = Date.now();
-    console.log(`🥽 Groq inference time: ${endTime - startTime}ms`);
+    console.log(`🥽 ${model} inference time: ${endTime - startTime}ms`);
   
     if (!isCompletionResponse(data)) {
       throw new Error("🤗 invalid response format from open router api");
