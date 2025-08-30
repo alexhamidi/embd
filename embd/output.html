@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en" class="bg-background text-foreground">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://cdn.tailwindcss.com"></script><link rel="stylesheet" href="/theme.css"></head>
+  <body class="min-h-screen p-4">
+    <main class="container mx-auto">
+      <section class="bg-card rounded shadow p-4">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="bg-secondary text-secondary-foreground rounded px-2 py-1 text-xs font-medium select-all">/.well-known/appspecific/com.chrome.devtools.json</span>
+
+          <div class="flex items-center gap-2 ml-auto">
+            <button id="btnOpen" class="bg-secondary text-secondary-foreground rounded px-3 py-2 text-sm hover:opacity-90 focus-visible:outline outline-2 outline-ring/50">Open</button>
+            <input id="fileInput" type="file" accept=".json,application/json" class="hidden" />
+
+            <button id="btnDownload" class="bg-primary text-primary-foreground rounded px-3 py-2 text-sm hover:opacity-90 focus-visible:outline outline-2 outline-ring/50">Download</button>
+            <button id="btnCopy" class="bg-secondary text-secondary-foreground rounded px-3 py-2 text-sm hover:opacity-90 focus-visible:outline outline-2 outline-ring/50">Copy</button>
+
+            <span class="w-px h-6 bg-background/40"></span>
+
+            <button id="btnFormat" class="bg-secondary text-secondary-foreground rounded px-3 py-2 text-sm hover:opacity-90 focus-visible:outline outline-2 outline-ring/50">Format</button>
+            <button id="btnMinify" class="bg-secondary text-secondary-foreground rounded px-3 py-2 text-sm hover:opacity-90 focus-visible:outline outline-2 outline-ring/50">Minify</button>
+
+            <label class="flex items-center gap-2 bg-secondary text-secondary-foreground rounded px-3 py-2 text-sm cursor-pointer select-none">
+              <input id="toggleWrap" type="checkbox" class="accent-current" />
+              Wrap
+            </label>
+
+            <span id="statusBadge" class="bg-secondary text-secondary-foreground rounded px-2 py-1 text-xs font-medium">Invalid</span>
+          </div>
+        </div>
+
+        <div id="dropHint" class="mt-3 hidden bg-accent text-accent-foreground rounded px-3 py-2 text-sm">Drop a .json file here to open</div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
+          <div class="relative">
+            <div id="editorContainer" class="relative bg-background border border-border rounded overflow-hidden">
+              <div class="grid grid-cols-[3rem,1fr]">
+                <pre id="lineNumbers" class="select-none text-muted-foreground bg-card px-2 py-2 text-sm leading-6 overflow-hidden">
+1
+</pre>
+                <div class="relative">
+                  <div id="errorLineOverlay" class="absolute left-0 right-0 bg-accent/40 pointer-events-none hidden" style="height: 24px; top: 0;"></div>
+                  <textarea id="editor" spellcheck="false" class="block w-full h-[50vh] resize-y bg-background text-foreground px-2 py-2 text-sm leading-6 font-mono tab-4 whitespace-pre border-0 focus:outline-none focus-visible:outline outline-2 outline-ring/50"></textarea>
+                </div>
+              </div>
+            </div>
+
+            <div id="errorBox" class="mt-2 hidden bg-accent text-accent-foreground rounded px-3 py-2 text-sm"></div>
+          </div>
+
+          <div class="bg-background border border-border rounded p-3">
+            <div class="flex items-center gap-2">
+              <input id="filterInput" type="text" placeholder="Filter keys/values" class="flex-1 bg-card text-foreground rounded px-3 py-2 text-sm border border-border focus-visible:outline outline-2 outline-ring/50" />
+              <button id="btnExpandAll" class="bg-secondary text-secondary-foreground rounded px-3 py-2 text-sm hover:opacity-90 focus-visible:outline outline-2 outline-ring/50">Expand all</button>
+              <button id="btnCollapseAll" class="bg-secondary text-secondary-foreground rounded px-3 py-2 text-sm hover:opacity-90 focus-visible:outline outline-2 outline-ring/50">Collapse all</button>
+            </div>
+            <div id="tree" class="mt-3 text-sm overflow-auto max-h-[50vh]"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <template id="treeNodeTemplate">
+      <div class="pl-3">
+        <div class="flex items-start gap-2">
+          <button class="toggle bg-secondary text-secondary-foreground rounded px-1 leading-none text-xs h-5 min-w-[1.25rem] hover:opacity-90 focus-visible:outline outline-2 outline-ring/50"></button>
+          <div class="nodeContent"></div>
+        </div>
+        <div class="children pl-4 mt-1"></div>
+      </div>
+    </template>
+
+    <script>
+      (function () {
+        const editor = document.getElementById('editor');
+        const lineNumbers = document.getElementById('lineNumbers');
+        const errorBox = document.getElementById('errorBox');
+        const errorOverlay = document.getElementById('errorLineOverlay');
+        const statusBadge = document.getElementById('statusBadge');
+        const fileInput = document.getElementById('fileInput');
+        const btnOpen = document.getElementById('btnOpen');
+        const btnDownload = document.getElementById('btnDownload');
+        const btnCopy = document.getElementById('btnCopy');
+        const btnFormat = document.getElementById('btnFormat');
+        const btnMinify = document.getElementById('btnMinify');
+        const toggleWrap = document.getElementById('toggleWrap');
+        const dropHint = document.getElementById('dropHint');
+
+        const treeRoot = document.getElementById('tree');
+        const filterInput = document.getElementById('filterInput');
+        const btnExpandAll = document.getElementById('btnExpandAll');
+        const btnCollapseAll = document.getElementById('btnCollapseAll');
+        const treeNodeTemplate = document.getElementById('treeNodeTemplate');
+
+        let lastValid = {};
+        let parseOk = false;
+
+        // Initialize editor with minimal valid JSON
+        editor.value = '{\n\n}';
+        updateLineNumbers();
+        validateAndRender();
+
+        // Controls
+        btnOpen.addEventListener('click', () => fileInput.click());
+        fileInput.addEventListener('change', async (e) => {
+          const file = e.target.files?.[0];
+          if (!file) return;
+          const text = await file.text();
+          setEditorText(text, true);
+          fileInput.value = '';
+        });
+
+        btnDownload.addEventListener('click', () => {
+          const blob = new Blob([editor.value], { type: 'application/json' });
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = 'com.chrome.devtools.json';
+          document.body.appendChild(a);
+          a.click();
+          URL.revokeObjectURL(a.href);
+          a.remove();
+        });
+
+        btnCopy.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(editor.value);
+            flashButton(btnCopy);
+          } catch {
+            // Fallback: selection copy
+            const sel = document.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(editor);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            document.execCommand('copy');
+            sel.removeAllRanges();
+          }
+        });
+
+        btnFormat.addEventListener('click', () => {
+          if (!parseOk) return flashError('Cannot format: invalid JSON');
+          const formatted = JSON.stringify(lastValid, null, 2);
+          setEditorText(formatted, false);
+        });
+
+        btnMinify.addEventListener('click', () => {
+          if (!parseOk) return flashError('Cannot minify: invalid JSON');
+          const minified = JSON.stringify(lastValid);
+          setEditorText(minified, false);
+        });
+
+        toggleWrap.addEventListener('change', () => {
+          editor.classList.toggle('whitespace-pre-wrap', toggleWrap.checked);
+          editor.classList.toggle('whitespace-pre', !toggleWrap.checked);
+        });
+
+        // Editor behaviors
+        editor.addEventListener('input', () => {
+          updateLineNumbers();
+          validateAndRender();
+        });
+
+        editor.addEventListener('scroll', () => {
+          lineNumbers.scrollTop = editor.scrollTop;
+          positionErrorOverlay();
+        });
+
+        editor.addEventListener('keydown', (e) => {
+          if (e.key === 'Tab') {
+            e.preventDefault();
+            insertAtCursor('  ');
+          }
+          if (e.key === 'Enter') {
+            autoIndent(e);
+          }
+        });
+
+        // Drag & drop open
+        const editorContainer = document.getElementById('editorContainer');
+        ;['dragenter','dragover'].forEach(evt =>
+          editorContainer.addEventListener(evt, (e) => {
+            e.preventDefault();
+            dropHint.classList.remove('hidden');
+          })
+        );
+        ;['dragleave','drop'].forEach(evt =>
+          editorContainer.addEventListener(evt, (e) => {
+            e.preventDefault();
+            if (evt === 'drop') handleDrop(e);
+            dropHint.classList.add('hidden');
+          })
+        );
+
+        async function handleDrop(e) {
+          const dt = e.dataTransfer;
+          if (dt.files && dt.files.length) {
+            const file = dt.files[0];
+            const text = await file.text();
+            setEditorText(text, true);
+          } else {
+            const text = dt.getData('text/plain');
+            if (text) setEditorText(text, true);
+          }
+        }
+
+        // Tree viewer
+        filterInput.addEventListener('input', () => {
+          renderTree(lastValid, filterInput.value.trim());
+        });
+        btnExpandAll.addEventListener('click', () => setAllToggles(true));
+        btnCollapseAll.addEventListener('click', () => setAllToggles(false));
+
+        function setEditorText(text, tryFormatIfValid) {
+          editor.value = text;
+          updateLineNumbers();
+          validateAndRender(tryFormatIfValid);
+        }
+
+        function updateLineNumbers() {
+          const lines = editor.value.split('\n').length || 1;
+          let buf = '';
+          for (let i = 1; i <= lines; i++) buf += i + '\n';
+          lineNumbers.textContent = buf;
+        }
+
+        function parseJsonWithPosition(text) {
+          try {
+            const parsed = JSON.parse(text);
+            return { ok: true, value: parsed };
+          } catch (e) {
+            let message = String(e && e.message ? e.message : 'Invalid JSON');
+            let pos = null;
+            let line = null;
+            let col = null;
+
+            // Try to extract "at position N"
+            const mPos = message.match(/position\s+(\d+)/i);
+            if (mPos) {
+              pos = parseInt(mPos[1], 10);
+              const before = text.slice(0, pos);
+              const ls = before.split('\n');
+              line = ls.length;
+              col = ls[ls.length - 1].length + 1;
+            }
+
+            // Try "line X column Y"
+            if (!mPos) {
+              const mLineCol = message.match(/line\s+(\d+)\s*column\s+(\d+)/i);
+              if (mLineCol) {
+                line = parseInt(mLineCol[1], 10);
+                col = parseInt(mLineCol[2], 10);
+              }
+            }
+
+            return { ok: false, error: message, line, col, pos };
+          }
+        }
+
+        function validateAndRender(tryFormatIfValid = false) {
+          const text = editor.value;
+          const result = parseJsonWithPosition(text);
+          if (result.ok) {
+            parseOk = true;
+            lastValid = result.value;
+            statusBadge.textContent = 'Valid';
+            statusBadge.classList.remove('bg-accent', 'text-accent-foreground');
+            statusBadge.classList.add('bg-secondary', 'text-secondary-foreground');
+            errorBox.classList.add('hidden');
+            errorOverlay.classList.add('hidden');
+            if (tryFormatIfValid) {
+              const formatted = JSON.stringify(lastValid, null, 2);
+              if (formatted !== text) {
+                editor.value = formatted;
+                updateLineNumbers();
+              }
+            }
+            renderTree(lastValid, filterInput.value.trim());
+          } else {
+            parseOk = false;
+            statusBadge.textContent = 'Invalid';
+            statusBadge.classList.remove('bg-secondary', 'text-secondary-foreground');
+            statusBadge.classList.add('bg-accent', 'text-accent-foreground');
+
+            const hint = result.line && result.col ? ` at line ${result.line}, column ${result.col}` : '';
+            errorBox.textContent = `${result.error}${hint}`;
+            errorBox.classList.remove('hidden');
+
+            // Highlight error line
+            if (result.line) {
+              positionErrorOverlay(result.line);
+            } else if (typeof result.pos === 'number') {
+              const before = text.slice(0, result.pos);
+              const line = before.split('\n').length;
+              positionErrorOverlay(line);
+            } else {
+              errorOverlay.classList.add('hidden');
+            }
+
+            // Render nothing (or partial) in tree
+            treeRoot.innerHTML = '';
+          }
+          setButtonsState();
+        }
+
+        function positionErrorOverlay(lineNumber = null) {
+          if (lineNumber == null) {
+            errorOverlay.classList.add('hidden');
+            return;
+          }
+          const style = getComputedStyle(editor);
+          const lh = parseFloat(style.lineHeight || '24') || 24;
+          const paddingTop = parseFloat(style.paddingTop || '0') || 0;
+          const scrollTop = editor.scrollTop;
+          const firstVisibleLine = Math.floor(scrollTop / lh) + 1;
+          const top = paddingTop + (lineNumber - 1) * lh - scrollTop;
+
+          errorOverlay.style.height = lh + 'px';
+          errorOverlay.style.top = top + 'px';
+          errorOverlay.classList.remove('hidden');
+        }
+
+        function setButtonsState() {
+          btnFormat.disabled = !parseOk;
+          btnMinify.disabled = !parseOk;
+          [btnFormat, btnMinify].forEach(btn => {
+            btn.style.opacity = parseOk ? '1' : '0.6';
+            btn.style.cursor = parseOk ? 'pointer' : 'not-allowed';
+          });
+        }
+
+        function insertAtCursor(text) {
+          const start = editor.selectionStart;
+          const end = editor.selectionEnd;
+          const value = editor.value;
+          editor.value = value.slice(0, start) + text + value.slice(end);
+          editor.selectionStart = editor.selectionEnd = start + text.length;
+          editor.dispatchEvent(new Event('input'));
+        }
+
+        function autoIndent(e) {
+          const start = editor.selectionStart;
+          const value = editor.value;
+          const left = value.lastIndexOf('\n', start - 1);
+          const lineStart = left === -1 ? 0 : left + 1;
+          const currentLine = value.slice(lineStart, start);
+          const indentMatch = currentLine.match(/^\s+/);
+          const baseIndent = indentMatch ? indentMatch[0] : '';
+          // Increase indent after { or [
+          const extra = /[\{\[]\s*$/.test(currentLine) ? '  ' : '';
+          const insert = '\n' + baseIndent + extra;
+          insertAtCursor(insert);
+        }
+
+        function flashError(msg) {
+          errorBox.textContent = msg;
+          errorBox.classList.remove('hidden');
+          setTimeout(() => validateAndRender(), 1200);
+        }
+
+        function flashButton(btn) {
+          const original = btn.textContent;
+          btn.textContent = 'Copied';
+          setTimeout(() => (btn.textContent = original), 900);
+        }
+
+        // Tree rendering
+        function renderTree(data, filter) {
+          treeRoot.innerHTML = '';
+          const root = buildNode('', data, 0, filter);
+          treeRoot.appendChild(root);
+        }
+
+        function buildNode(key, value, depth, filter) {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'space-y-1';
+
+          const isObject = value && typeof value === 'object' && !Array.isArray(value);
+          const isArray = Array.isArray(value);
+          const hasChildren = isObject || isArray;
+
+          const nodeEl = treeNodeTemplate.content.firstElementChild.cloneNode(true);
+          const toggle = nodeEl.querySelector('.toggle');
+          const nodeContent = nodeEl.querySelector('.nodeContent');
+          const childrenEl = nodeEl.querySelector('.children');
+
+          // Build label
+          const keySpan = document.createElement('span');
+          keySpan.className = 'text-foreground';
+          keySpan.textContent = key !== '' ? JSON.stringify(key) + ': ' : '';
+
+          const typeSpan = document.createElement('span');
+          let valueEl;
+          if (hasChildren) {
+            typeSpan.className = 'text-muted-foreground';
+            typeSpan.textContent = isObject ? '{ }' : '[ ]';
+          } else {
+            valueEl = document.createElement('span');
+            const t = typeof value;
+            if (t === 'string') {
+              valueEl.textContent = JSON.stringify(value);
+              valueEl.className = 'text-foreground';
+            } else if (t === 'number') {
+              valueEl.textContent = String(value);
+              valueEl.className = 'text-foreground';
+            } else if (t === 'boolean') {
+              valueEl.textContent = value ? 'true' : 'false';
+              valueEl.className = 'text-foreground';
+            } else if (value === null) {
+              valueEl.textContent = 'null';
+              valueEl.className = 'text-muted-foreground';
+            } else {
+              valueEl.textContent = String(value);
+              valueEl.className = 'text-foreground';
+            }
+          }
+
+          nodeContent.appendChild(keySpan);
+          if (hasChildren) nodeContent.appendChild(typeSpan);
+          if (valueEl) nodeContent.appendChild(valueEl);
+
+          // Filter match
+          const matches = computeFilterMatch(key, value, filter);
+          if (filter) {
+            if (!matches.nodeMatches && !matches.descendantMatches) {
+              nodeEl.style.display = 'none';
+            } else {
+              if (matches.nodeMatches) nodeContent.classList.add('bg-accent', 'text-accent-foreground', 'rounded', 'px-1');
+            }
+          }
+
+          // Children
+          if (hasChildren) {
+            toggle.textContent = depth < 1 ? '−' : '+';
+            const expanded = depth < 1;
+            childrenEl.style.display = expanded ? '' : 'none';
+
+            const entries = isArray ? value.map((v, i) => [i, v]) : Object.entries(value);
+            for (const [k, v] of entries) {
+              const child = buildNode(k, v, depth + 1, filter);
+              childrenEl.appendChild(child);
+            }
+
+            toggle.addEventListener('click', () => {
+              const isOpen = childrenEl.style.display !== 'none';
+              childrenEl.style.display = isOpen ? 'none' : '';
+              toggle.textContent = isOpen ? '+' : '−';
+            });
+          } else {
+            toggle.style.visibility = 'hidden';
+          }
+
+          wrapper.appendChild(nodeEl);
+          return wrapper;
+        }
+
+        function computeFilterMatch(key, value, filter) {
+          if (!filter) return { nodeMatches: false, descendantMatches: false };
+          const f = filter.toLowerCase();
+          const keyStr = key === '' ? '' : String(key).toLowerCase();
+          let nodeMatches = false;
+
+          if (keyStr && keyStr.includes(f)) nodeMatches = true;
+          if (!nodeMatches && (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')) {
+            if (String(value).toLowerCase().includes(f)) nodeMatches = true;
+          }
+
+          let descendantMatches = false;
+          if (!nodeMatches && value && typeof value === 'object') {
+            const stack = [value];
+            while (stack.length) {
+              const cur = stack.pop();
+              if (Array.isArray(cur)) {
+                for (const v of cur) {
+                  if (v && typeof v === 'object') stack.push(v);
+                  else if (String(v).toLowerCase().includes(f)) {
+                    descendantMatches = true; break;
+                  }
+                }
+              } else {
+                for (const [k, v] of Object.entries(cur)) {
+                  if (String(k).toLowerCase().includes(f)) { descendantMatches = true; break; }
+                  if (v && typeof v === 'object') stack.push(v);
+                  else if (String(v).toLowerCase().includes(f)) { descendantMatches = true; break; }
+                }
+              }
+              if (descendantMatches) break;
+            }
+          }
+
+          return { nodeMatches, descendantMatches };
+        }
+
+        function setAllToggles(expand) {
+          const toggles = treeRoot.querySelectorAll('.toggle');
+          toggles.forEach(btn => {
+            const children = btn.closest('div').nextElementSibling;
+            if (children && children.classList.contains('children')) {
+              children.style.display = expand ? '' : 'none';
+              btn.textContent = expand ? '−' : '+';
+            }
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>
