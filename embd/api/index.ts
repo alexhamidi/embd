@@ -297,7 +297,7 @@ Do not output \`\`\`html or \`\`\`html\n`
     const userPrompt = `Generate a modern, sleek page for: ${fullUrl}`
     let html = ''
     try {
-      html = await ai(systemPrompt, userPrompt, 'text/plain', 'openai/gpt-5')
+      html = await ai(systemPrompt, userPrompt, 'text/plain', process.env.MODEL || 'meta-llama/llama-4-maverick')
     } catch (error) {
       console.error('Error generating webpage:', error)
       return c.json({ error: 'Failed to generate webpage', details: error instanceof Error ? error.message : 'Unknown error' }, 500)
