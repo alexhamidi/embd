@@ -1,9 +1,55 @@
 import { Hono } from 'hono'
 import { handle } from 'hono/vercel'
+import { createClient } from 'redis';
+
+const client = createClient({
+    username: 'default',
+    password: process.env.REDIS_PASSWORD,
+    socket: {
+        host: process.env.REDIS_HOST,
+        port: parseInt(process.env.REDIS_PORT || '6379')
+    }
+});
+
+let isRedisConnected = false;
+
+async function initRedis() {
+    if (!isRedisConnected && process.env.REDIS_HOST && process.env.REDIS_PASSWORD) {
+        try {
+            await client.connect();
+            isRedisConnected = true;
+            console.log('✅ Redis connected successfully');
+        } catch (error) {
+            console.warn('⚠️ Redis connection failed:', error);
+            isRedisConnected = false;
+        }
+    }
+}
+
+async function getFromCache(key: string): Promise<string | null> {
+    if (!isRedisConnected) return null;
+    try {
+        return await client.get(key);
+    } catch (error) {
+        console.warn('⚠️ Redis get failed:', error);
+        return null;
+    }
+}
+
+async function setToCache(key: string, value: string, ttlSeconds = 3600): Promise<void> {
+    if (!isRedisConnected) return;
+    try {
+        await client.setEx(key, ttlSeconds, value);
+    } catch (error) {
+        console.warn('⚠️ Redis set failed:', error);
+    }
+}
+
+initRedis();
+
 
 
 const app = new Hono()
-const cache = new Map<string, string>()
 type Message = {
     role: "user" | "assistant" | "system";
     content: string;
@@ -227,9 +273,13 @@ app.get('/*', async (c) => {
     const queryString = c.req.url.split('?')[1] || ''
     const fullUrl = queryString ? `${fullPath}?${queryString}` : fullPath
 
-    if (cache.has(fullUrl)) {
-      return c.html(cache.get(fullUrl)!)
+    const cachedHtml = await getFromCache(fullUrl)
+    if (cachedHtml) {
+      console.log(`📦 Cache hit for: ${fullUrl}`)
+      return c.html(cachedHtml)
     }
+
+    console.log(`🔄 Cache miss for: ${fullUrl}, generating new content`)
 
     const systemPrompt = `You are a web developer. Based on URL ${fullUrl}, generate a valid HTML page.
 Only return raw HTML (no markdown). Use Tailwind utilities for layout/spacing (container, grid, p-*, flex, rounded, shadow).
@@ -252,16 +302,14 @@ Do not output \`\`\`html or \`\`\`html\n`
     const userPrompt = `Generate a modern, sleek page for: ${fullUrl}`
     let html = ''
     try {
-
       html = await ai(systemPrompt, userPrompt, 'text/plain', 'openai/gpt-5')
     } catch (error) {
       console.error('Error generating webpage:', error)
       return c.json({ error: 'Failed to generate webpage', details: error instanceof Error ? error.message : 'Unknown error' }, 500)
     }
 
-
     const finalHtml = injectHead(html)
-    cache.set(fullUrl, finalHtml)
+    await setToCache(fullUrl, finalHtml, 3600)
 
     return c.html(finalHtml)
   } catch (error) {
