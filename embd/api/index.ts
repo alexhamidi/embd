@@ -1,5 +1,4 @@
 import { Hono } from 'hono'
-import { handle } from '@hono/vercel'
 import infer from '../src/ai'
 
 const app = new Hono()
@@ -148,4 +147,4 @@ Do not output \`\`\`html or \`\`\`html\n`
   }
 })
 
-export default handle(app)
+export default app
